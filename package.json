@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "plasmo dev",
     "build": "plasmo build",
-    "package": "plasmo package"
+    "package": "plasmo package",
+    "prepare": "husky"
   },
   "dependencies": {
     "@plasmohq/storage": "^1.15.0",
@@ -20,6 +21,7 @@
     "@types/node": "20.14.9",
     "@types/react": "18.3.3",
     "@types/react-dom": "18.3.0",
+    "husky": "^9.1.7",
     "prettier": "3.3.3",
     "typescript": "5.5.3"
   },

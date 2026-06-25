@@ -1,0 +1,3 @@
+echo ""
+echo "🔐 Running security check before push..."
+bash scripts/check-secrets.sh

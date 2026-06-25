@@ -1,0 +1,13 @@
+# Gitleaks configuration for chrome-translator
+title = "chrome-translator gitleaks config"
+
+[allowlist]
+  description = "Files to skip during secret scanning"
+  paths = [
+    # Security scan scripts contain regex patterns that match secrets
+    '''scripts/check-secrets.sh''',
+    # Lockfiles and generated files
+    '''pnpm-lock.yaml''',
+    # README and docs
+    '''README.md''',
+  ]
