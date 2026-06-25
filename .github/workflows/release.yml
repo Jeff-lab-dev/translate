@@ -1,0 +1,62 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    env:
+      COMMIT_SHA: ${{ github.sha }}
+      COMMIT_MSG: ${{ github.event.head_commit.message }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build extension
+        run: pnpm build
+
+      - name: Package extension
+        run: pnpm package
+
+      - name: Create/Update Release
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "build/*.zip"
+          tag: latest
+          name: "Latest Build"
+          body: |
+            ## 自动构建版本
+
+            - **Commit**: ${{ env.COMMIT_SHA }}
+            - **时间**: ${{ github.event.head_commit.timestamp || '手动触发' }}
+            - **消息**: ${{ env.COMMIT_MSG }}
+
+            ### 安装方式
+            1. 下载下方的 `.zip` 文件
+            2. 解压到任意目录
+            3. Chrome → `chrome://extensions` → 开发者模式
+            4. 加载已解压的扩展程序 → 选择解压目录
+          allowUpdates: true
+          removeArtifacts: true
+          makeLatest: true
