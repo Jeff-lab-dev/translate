@@ -1,39 +1,82 @@
 import type { PlasmoCSConfig } from "plasmo"
+import { type DisplayMode, DEFAULT_MODE } from "./types"
 
 export const config: PlasmoCSConfig = {
   matches: ["<all_urls>"],
   run_at: "document_end"
 }
 
-// ── Types ──────────────────────────────────────────────
-interface LLMSettings {
-  apiEndpoint: string
-  apiKey: string
-  model: string
-  systemPrompt: string
-  maxTokens: number
-  temperature: number
-}
-
 // ── State ──────────────────────────────────────────────
 let floatingBtn: HTMLDivElement | null = null
-let miniPanel: HTMLDivElement | null = null
 let isTranslating = false
+
+let currentMode: DisplayMode = DEFAULT_MODE
+let storageListenerRegistered = false
+
+// Original-content snapshots for replace-mode restoration (§6.1).
+// WeakMap releases with the element; translations don't persist across reload.
+const originalSnapshot = new WeakMap<HTMLElement, Node[]>()
+
+const DISPLAY_MODE_KEY = "displayMode"
 
 // ── Init ───────────────────────────────────────────────
 function init() {
   if (document.getElementById("ct-floating-btn")) return
+  ensureStyle()
   createFloatingButton()
-  createMiniPanel()
-  setupClickOutside()
+  loadDisplayMode()
+  registerStorageListener()
+  syncButtonState()
 }
 
-// ── Floating Button ────────────────────────────────────
+// ── Display mode (storage) ─────────────────────────────
+function isValidMode(v: unknown): v is DisplayMode {
+  return v === "bilingual" || v === "replace"
+}
+
+async function loadDisplayMode() {
+  try {
+    const { displayMode } = await chrome.storage.local.get(DISPLAY_MODE_KEY)
+    if (isValidMode(displayMode)) currentMode = displayMode
+  } catch {
+    // keep DEFAULT_MODE on any failure
+  }
+}
+
+// Idempotent: register once even if init() runs again (SPA re-injection). (N3)
+function registerStorageListener() {
+  if (storageListenerRegistered) return
+  storageListenerRegistered = true
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return
+    const change = changes[DISPLAY_MODE_KEY]
+    if (change && isValidMode(change.newValue)) {
+      currentMode = change.newValue
+    }
+  })
+}
+
+// ── Injected styles ────────────────────────────────────
+function ensureStyle() {
+  if (document.getElementById("ct-style")) return
+  const s = document.createElement("style")
+  s.id = "ct-style"
+  s.textContent = `
+    .ct-replaced{
+      border-left:3px solid #2563eb;
+      background:rgba(37,99,235,0.05);
+      padding-left:8px;
+    }
+  `
+  ;(document.head || document.documentElement).appendChild(s)
+}
+
+// ── Floating Button (closed loop: translate <-> cancel) ──
 function createFloatingButton() {
   floatingBtn = document.createElement("div")
   floatingBtn.id = "ct-floating-btn"
   floatingBtn.innerHTML = "译"
-  floatingBtn.title = "双语翻译助手 - 选中文本后点击翻译"
+  floatingBtn.title = "双语翻译助手 - 点击翻译整页"
 
   Object.assign(floatingBtn.style, {
     position: "fixed",
@@ -130,107 +173,92 @@ function makeDraggable(el: HTMLElement) {
   })
 }
 
-// ── Mini Panel ─────────────────────────────────────────
-function createMiniPanel() {
-  miniPanel = document.createElement("div")
-  miniPanel.id = "ct-mini-panel"
-  miniPanel.style.display = "none"
-
-  Object.assign(miniPanel.style, {
-    position: "fixed",
-    bottom: "130px",
-    right: "20px",
-    width: "200px",
-    background: "#fff",
-    borderRadius: "12px",
-    boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
-    zIndex: "2147483645",
-    overflow: "hidden",
-    fontFamily: "system-ui, sans-serif"
-  })
-
-  miniPanel.innerHTML = `
-    <div style="padding:12px 16px;border-bottom:1px solid #f0f0f0;font-size:13px;font-weight:600;color:#333">
-      🌐 双语翻译助手
-    </div>
-    <button id="ct-translate-page" style="
-      width:100%;padding:10px 16px;border:none;background:none;
-      font-size:13px;color:#374151;cursor:pointer;text-align:left;
-      display:flex;align-items:center;gap:8px;
-    ">📄 翻译整个页面</button>
-    <button id="ct-translate-selection" style="
-      width:100%;padding:10px 16px;border:none;background:none;
-      font-size:13px;color:#374151;cursor:pointer;text-align:left;
-      display:flex;align-items:center;gap:8px;
-    ">✂️ 翻译选中文本</button>
-    <div style="border-top:1px solid #f0f0f0"></div>
-    <button id="ct-open-settings" style="
-      width:100%;padding:10px 16px;border:none;background:none;
-      font-size:13px;color:#6b7280;cursor:pointer;text-align:left;
-      display:flex;align-items:center;gap:8px;
-    ">⚙️ 打开设置</button>
-  `
-
-  document.body.appendChild(miniPanel)
-
-  miniPanel
-    .querySelector("#ct-translate-page")!
-    .addEventListener("click", () => {
-      hideMiniPanel()
-      translatePage()
-    })
-  miniPanel
-    .querySelector("#ct-translate-selection")!
-    .addEventListener("click", () => {
-      hideMiniPanel()
-      translateSelection()
-    })
-  miniPanel
-    .querySelector("#ct-open-settings")!
-    .addEventListener("click", () => {
-      chrome.runtime.sendMessage({ type: "openOptions" })
-      hideMiniPanel()
-    })
-}
-
-function toggleMiniPanel() {
-  if (!miniPanel) return
-  if (miniPanel.style.display === "none") {
-    miniPanel.style.display = "block"
-  } else {
-    hideMiniPanel()
-  }
-}
-
-function hideMiniPanel() {
-  if (miniPanel) miniPanel.style.display = "none"
-}
-
-function setupClickOutside() {
-  document.addEventListener("click", (e: MouseEvent) => {
-    if (!miniPanel || miniPanel.style.display === "none") return
-    const target = e.target as HTMLElement
-    if (
-      !miniPanel.contains(target) &&
-      target.id !== "ct-floating-btn" &&
-      !floatingBtn?.contains(target)
-    ) {
-      hideMiniPanel()
-    }
-  })
-}
-
-// ── Click handler ──────────────────────────────────────
+// ── Floating button click: translate <-> cancel ───────
 function handleFloatingBtnClick(e: MouseEvent) {
-  const selection = window.getSelection()
-  if (selection && selection.toString().trim().length > 0) {
-    translateSelection()
+  if (isTranslating) return
+  if (hasTranslations()) {
+    clearAllTranslations() // cancel -> restore original
   } else {
-    toggleMiniPanel()
+    translatePage()
   }
+}
+
+function hasTranslations(): boolean {
+  return !!document.querySelector("[data-ct-mode], .ct-translation")
+}
+
+function syncButtonState() {
+  if (!floatingBtn) return
+  setBtnTranslated(hasTranslations())
+}
+
+function setBtnTranslated(translated: boolean) {
+  if (!floatingBtn) return
+  floatingBtn.style.background = translated
+    ? "linear-gradient(135deg, #9ca3af, #6b7280)"
+    : "linear-gradient(135deg, #2563eb, #1d4ed8)"
+  floatingBtn.title = translated
+    ? "双语翻译助手 - 点击取消翻译（恢复原文）"
+    : "双语翻译助手 - 点击翻译整页"
+}
+
+function setBtnBusy(busy: boolean) {
+  if (!floatingBtn) return
+  floatingBtn.style.opacity = busy ? "0.6" : "1"
+  floatingBtn.style.pointerEvents = busy ? "none" : "auto"
 }
 
 // ── Translation logic ──────────────────────────────────
+async function translatePage() {
+  // Lock check first; do NOT clear while a translation is in progress. (N6)
+  if (isTranslating) {
+    showToast("翻译进行中，请稍候...")
+    return
+  }
+
+  // Clear field so we always translate from the original text, never from
+  // an existing (Chinese) translation — avoids "Chinese-to-Chinese".
+  clearAllTranslations()
+
+  const blocks = collectTextBlocks()
+  if (blocks.length === 0) {
+    showToast("当前页面无可翻译的文本块")
+    syncButtonState()
+    return
+  }
+
+  const delimiter = "\n\n---NEXT---\n\n"
+  const combined = blocks.map((b) => b.text).join(delimiter)
+
+  setBtnBusy(true)
+  try {
+    const translation = await doTranslate(combined, "page")
+    if (translation) {
+      const translatedBlocks = translation
+        .split("---NEXT---")
+        .map((s) => s.trim())
+      blocks.forEach((block, i) => {
+        if (translatedBlocks[i]) {
+          if (currentMode === "replace") {
+            insertReplace(block.el, translatedBlocks[i])
+          } else {
+            insertBilingual(block.el, translatedBlocks[i])
+          }
+        }
+      })
+      // N7: surface the 30-block cap in the completion toast to avoid "incomplete" confusion.
+      if (blocks.length >= 30) {
+        showToast("✅ 翻译完成（前 30 块）")
+      }
+    }
+  } finally {
+    setBtnBusy(false)
+    syncButtonState()
+  }
+}
+
+// Selection translate is triggered by the selection bubble (PR-B).
+// Kept here so PR-B can wire it without touching the rest of this file.
 async function translateSelection() {
   const selection = window.getSelection()
   if (!selection || selection.toString().trim().length === 0) {
@@ -241,31 +269,6 @@ async function translateSelection() {
   await doTranslate(text, "selection")
 }
 
-async function translatePage() {
-  // Collect all visible text blocks from the page
-  const blocks = collectTextBlocks()
-  if (blocks.length === 0) {
-    showToast("当前页面无可翻译的文本块")
-    return
-  }
-
-  // Join with a delimiter for batch translation
-  const delimiter = "\n\n---NEXT---\n\n"
-  const combined = blocks.map((b) => b.text).join(delimiter)
-
-  const translation = await doTranslate(combined, "page")
-
-  if (translation) {
-    // Split back and insert translations
-    const translatedBlocks = translation.split("---NEXT---").map((s) => s.trim())
-    blocks.forEach((block, i) => {
-      if (translatedBlocks[i]) {
-        insertTranslation(block.el, translatedBlocks[i])
-      }
-    })
-  }
-}
-
 // Tags whose text content should NOT be translated:
 // code/pre (would corrupt code), form/interactive controls, media, metadata, etc.
 const NO_TRANSLATE_SELECTOR =
@@ -273,8 +276,9 @@ const NO_TRANSLATE_SELECTOR =
   "textarea,label,noscript,template,iframe,object,embed,canvas,svg,math," +
   "title,meta,link,base,head"
 
-// Our own injected UI elements
-const SELF_SELECTOR = '[id^="ct-"],#ct-floating-btn,#ct-mini-panel,.ct-translation'
+// Skip our own injected UI, existing translations, and already-replaced blocks.
+const SELF_SELECTOR =
+  '[id^="ct-"],.ct-translation,[data-ct-mode]'
 
 // Display values considered inline (text rolls up to nearest block ancestor)
 const INLINE_DISPLAYS = new Set([
@@ -325,7 +329,7 @@ function collectTextBlocks(): { el: HTMLElement; text: string }[] {
       }
       // Skip code / interactive / media / metadata tags (incl. ancestors)
       if (parent.closest(NO_TRANSLATE_SELECTOR)) return NodeFilter.FILTER_REJECT
-      // Skip our own injected UI / existing translations
+      // Skip our own injected UI / existing translations / replaced blocks
       if (parent.closest(SELF_SELECTOR)) return NodeFilter.FILTER_REJECT
       // Skip hidden elements
       if (isHidden(parent)) return NodeFilter.FILTER_REJECT
@@ -377,10 +381,7 @@ function containsEnglish(text: string): boolean {
   return (englishChars?.length || 0) >= 1
 }
 
-async function doTranslate(
-  text: string,
-  mode: string
-): Promise<string | null> {
+async function doTranslate(text: string, mode: string): Promise<string | null> {
   if (isTranslating) {
     showToast("翻译进行中，请稍候...")
     return null
@@ -415,10 +416,11 @@ async function doTranslate(
   }
 }
 
-function insertTranslation(originalEl: HTMLElement, translated: string) {
+// ── Insertion: bilingual (original behavior) ─────────
+function insertBilingual(originalEl: HTMLElement, translated: string) {
   if (!translated || translated.length < 2) return
 
-  // Check if already translated
+  // Keep the existing "already translated" guard (N5).
   if (originalEl.nextElementSibling?.classList.contains("ct-translation")) return
 
   const transEl = document.createElement("div")
@@ -440,6 +442,51 @@ function insertTranslation(originalEl: HTMLElement, translated: string) {
   })
 
   originalEl.insertAdjacentElement("afterend", transEl)
+}
+
+// ── Insertion: replace original text ──────────────────
+function insertReplace(el: HTMLElement, translated: string) {
+  if (!translated || translated.length < 2) return
+  if (el.dataset.ctMode === "replaced") return // idempotent
+
+  // Snapshot original child nodes (cloned) for restoration; avoids re-parsing
+  // innerHTML on restore (no XSS/re-exec risk). (E1)
+  originalSnapshot.set(
+    el,
+    Array.from(el.childNodes).map((n) => n.cloneNode(true))
+  )
+
+  // Flatten inline structure (links/bold/<br> lost) — accepted v1 tradeoff. (B4)
+  el.textContent = translated // textContent only, never innerHTML (E2)
+  el.dataset.ctMode = "replaced"
+  el.dataset.ctSource = "page"
+  el.classList.add("ct-replaced")
+}
+
+// ── Restore / clear ───────────────────────────────────
+function restoreReplacedBlock(el: HTMLElement) {
+  const snap = originalSnapshot.get(el)
+  if (!snap) {
+    // Fallback: just clear markers if no snapshot present.
+    delete el.dataset.ctMode
+    delete el.dataset.ctSource
+    el.classList.remove("ct-replaced")
+    return
+  }
+  // Clone again so the snapshot can be reused if needed.
+  el.replaceChildren(...snap.map((n) => n.cloneNode(true)))
+  delete el.dataset.ctMode
+  delete el.dataset.ctSource
+  el.classList.remove("ct-replaced")
+  originalSnapshot.delete(el)
+}
+
+function clearAllTranslations() {
+  document.querySelectorAll("[data-ct-mode]").forEach((el) => {
+    restoreReplacedBlock(el as HTMLElement)
+  })
+  document.querySelectorAll(".ct-translation").forEach((n) => n.remove())
+  syncButtonState()
 }
 
 // ── Toast notification ─────────────────────────────────
@@ -486,4 +533,3 @@ init()
 // this file as a Content Script UI (CSUI) and wrap it in a Shadow DOM host,
 // which is unnecessary here and was the likely cause of the script not running.
 export {}
-

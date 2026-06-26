@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react"
 import { Storage } from "@plasmohq/storage"
+import { type DisplayMode, DEFAULT_MODE } from "./types"
 
 const storage = new Storage()
+const DISPLAY_MODE_KEY = "displayMode"
 
 interface LLMSettings {
   apiEndpoint: string
@@ -24,6 +26,7 @@ const DEFAULT_SETTINGS: LLMSettings = {
 
 function OptionsPage() {
   const [settings, setSettings] = useState<LLMSettings>(DEFAULT_SETTINGS)
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(DEFAULT_MODE)
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState("")
@@ -41,10 +44,17 @@ function OptionsPage() {
         setSettings(DEFAULT_SETTINGS)
       }
     }
+    const storedMode = await storage.get(DISPLAY_MODE_KEY)
+    if (storedMode === "bilingual" || storedMode === "replace") {
+      setDisplayMode(storedMode)
+    } else {
+      setDisplayMode(DEFAULT_MODE)
+    }
   }
 
   async function handleSave() {
     await storage.set("llmSettings", JSON.stringify(settings))
+    await storage.set(DISPLAY_MODE_KEY, displayMode)
     setSaved(true)
     setTimeout(() => setSaved(false), 2000)
   }
@@ -179,6 +189,46 @@ function OptionsPage() {
             onChange={update("systemPrompt")}
             rows={3}
           />
+        </div>
+
+        <div style={styles.field}>
+          <label style={styles.label}>显示模式</label>
+          <div style={{ display: "flex", gap: 16, marginTop: 4 }}>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 14,
+                cursor: "pointer",
+                color: "#374151"
+              }}>
+              <input
+                type="radio"
+                name="displayMode"
+                checked={displayMode === "bilingual"}
+                onChange={() => setDisplayMode("bilingual")}
+              />
+              双语对照（译文在原文下方）
+            </label>
+            <label
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 14,
+                cursor: "pointer",
+                color: "#374151"
+              }}>
+              <input
+                type="radio"
+                name="displayMode"
+                checked={displayMode === "replace"}
+                onChange={() => setDisplayMode("replace")}
+              />
+              译文替换（用译文替换原文，可恢复）
+            </label>
+          </div>
         </div>
 
         <div style={styles.actions}>
