@@ -1,5 +1,12 @@
 import { useState } from "react"
 
+// Inlined at build time from .env.local (written by scripts/gen-version.mjs).
+// Fallbacks keep tsc/fresh-clone builds working when no build metadata exists.
+const BUILD_VERSION = process.env.PLASMO_PUBLIC_BUILD_VERSION || "0.0.0"
+const BUILD_SHA = process.env.PLASMO_PUBLIC_BUILD_SHA || "dev"
+const BUILD_DATE = process.env.PLASMO_PUBLIC_BUILD_DATE || ""
+const BUILD_TAG = process.env.PLASMO_PUBLIC_BUILD_TAG || ""
+
 function PopupPage() {
   const [status, setStatus] = useState("")
 
@@ -22,10 +29,12 @@ function PopupPage() {
       </div>
 
       <div style={styles.footer}>
-        <span style={styles.version}>v1.0.0</span>
-        <span style={styles.tip}>
-          提示：在任何网页右下角找到浮窗按钮
+        <span style={styles.version}>
+          v{BUILD_VERSION}
+          {BUILD_SHA && BUILD_SHA !== "dev" ? ` · ${BUILD_SHA}` : ""}
+          {BUILD_DATE ? ` · ${BUILD_DATE}` : ""}
         </span>
+        <span style={styles.tip}>右下角浮窗按钮</span>
       </div>
     </div>
   )

@@ -67,6 +67,11 @@ npx tsc --noEmit           # 类型检查（改完代码先跑）
 5. 真实 Chrome 加载 `build/chrome-mv3-prod` 手测关键路径通过（浮窗出现 / 翻译链路 / 设置保存）。
 6. 若改了行为，更新对应 `docs/` 规格书并标注变更摘要。
 7. 提交到特性分支（非 main），开 PR，base = main。
+8. **根据本次改动大小 bump `package.json` 的 `version`**，在同一 PR 内提交（版本号是发版依据，CI 用它打 tag `vX.Y.Z`）：
+   - 破坏性变更 / 大重构 / 移除功能 → **major**（X.0.0）
+   - 新功能 / 新 UI / 中等非破坏性改动 → **minor**（X.Y.0）
+   - 修复 / chore / 文档 / 配置 / 无行为变化的重构 → **patch**（X.Y.Z）
+   - 纯实验性/WIP 不发版的改动可跳过。Plasmo 自动把 `package.json.version` 同步到 `manifest.version`，无需手改 manifest。
 
 ## Review 标准（自检与审 PR 用同一份）
 
