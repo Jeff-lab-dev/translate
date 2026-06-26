@@ -36,7 +36,10 @@ function isValidMode(v: unknown): v is DisplayMode {
 
 async function loadDisplayMode() {
   try {
-    const { displayMode } = await chrome.storage.local.get(DISPLAY_MODE_KEY)
+    // Read from `sync` to match options.tsx, which writes via @plasmohq/storage
+    // (whose default area is "sync"). Reading `local` here would never see
+    // the value and silently fall back to bilingual — the replace-mode bug.
+    const { displayMode } = await chrome.storage.sync.get(DISPLAY_MODE_KEY)
     if (isValidMode(displayMode)) currentMode = displayMode
   } catch {
     // keep DEFAULT_MODE on any failure
@@ -48,7 +51,7 @@ function registerStorageListener() {
   if (storageListenerRegistered) return
   storageListenerRegistered = true
   chrome.storage.onChanged.addListener((changes, area) => {
-    if (area !== "local") return
+    if (area !== "sync") return // matches options.tsx @plasmohq/storage default
     const change = changes[DISPLAY_MODE_KEY]
     if (change && isValidMode(change.newValue)) {
       currentMode = change.newValue
