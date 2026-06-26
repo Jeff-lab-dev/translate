@@ -481,7 +481,9 @@ function showToast(message: string) {
 // ── Start ──────────────────────────────────────────────
 init()
 
-// Export empty component to satisfy Plasmo content script convention
-export default function ContentScript() {
-  return null
-}
+// This is a raw side-effect content script (no React UI), so we intentionally
+// do NOT export a default component. Exporting one would make Plasmo treat
+// this file as a Content Script UI (CSUI) and wrap it in a Shadow DOM host,
+// which is unnecessary here and was the likely cause of the script not running.
+export {}
+
