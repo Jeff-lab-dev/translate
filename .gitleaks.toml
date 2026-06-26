@@ -1,6 +1,11 @@
 # Gitleaks configuration for chrome-translator
 title = "chrome-translator gitleaks config"
 
+# Merge gitleaks built-in rules on top of this config, so our
+# custom allowlist doesn't disable the default secret detectors.
+[extend]
+  useDefault = true
+
 [allowlist]
   description = "Files to skip during secret scanning"
   paths = [

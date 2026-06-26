@@ -33,15 +33,5 @@
       "storage",
       "activeTab"
     ]
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@swc/core",
-      "esbuild",
-      "sharp",
-      "lmdb",
-      "@parcel/watcher",
-      "msgpackr-extract"
-    ]
   }
 }
