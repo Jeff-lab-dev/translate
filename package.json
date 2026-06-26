@@ -5,8 +5,9 @@
   "description": "自用双语翻译 Chrome 插件 - 英译中，支持自定义 LLM",
   "author": "amkkrr",
   "scripts": {
-    "dev": "plasmo dev",
-    "build": "plasmo build",
+    "dev": "node scripts/gen-version.mjs && plasmo dev",
+    "build": "node scripts/gen-version.mjs && plasmo build",
+    "bump": "node scripts/bump-version.mjs",
     "package": "plasmo package",
     "prepare": "husky"
   },
