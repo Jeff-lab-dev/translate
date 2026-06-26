@@ -266,80 +266,109 @@ async function translatePage() {
   }
 }
 
+// Tags whose text content should NOT be translated:
+// code/pre (would corrupt code), form/interactive controls, media, metadata, etc.
+const NO_TRANSLATE_SELECTOR =
+  "script,style,pre,code,kbd,samp,var,tt,button,input,select,option,optgroup," +
+  "textarea,label,noscript,template,iframe,object,embed,canvas,svg,math," +
+  "title,meta,link,base,head"
+
+// Our own injected UI elements
+const SELF_SELECTOR = '[id^="ct-"],#ct-floating-btn,#ct-mini-panel,.ct-translation'
+
+// Display values considered inline (text rolls up to nearest block ancestor)
+const INLINE_DISPLAYS = new Set([
+  "inline",
+  "inline-block",
+  "inline-flex",
+  "inline-grid",
+  "inline-table",
+  "contents",
+  "run-in"
+])
+
+// Find the nearest block-level ancestor of `el`. Inline elements are skipped
+// so that text inside <span>/<a>/<em> rolls up to the enclosing <p>/<li>/<td>…
+function findBlockAncestor(el: HTMLElement): HTMLElement | null {
+  let node: HTMLElement | null = el
+  while (node && node !== document.body.parentElement) {
+    if (node === document.body) return node
+    const display = window.getComputedStyle(node).display
+    if (!INLINE_DISPLAYS.has(display)) return node
+    node = node.parentElement
+  }
+  return el
+}
+
+function isHidden(el: HTMLElement): boolean {
+  const style = window.getComputedStyle(el)
+  return (
+    style.display === "none" ||
+    style.visibility === "hidden" ||
+    Number(style.opacity) === 0
+  )
+}
+
 function collectTextBlocks(): { el: HTMLElement; text: string }[] {
   const blocks: { el: HTMLElement; text: string }[] = []
-  const seen = new Set<string>()
+  const seenEl = new WeakSet<HTMLElement>() // dedupe by block element
+  const seenText = new Set<string>() // dedupe by text hash
 
-  const walker = document.createTreeWalker(
-    document.body,
-    NodeFilter.SHOW_ELEMENT,
-    {
-      acceptNode(node: HTMLElement) {
-        // Skip hidden elements
-        const style = window.getComputedStyle(node)
-        if (style.display === "none" || style.visibility === "hidden") {
-          return NodeFilter.FILTER_REJECT
-        }
-        // Skip our own injected elements
-        if (
-          node.id?.startsWith("ct-") ||
-          node.closest?.("#ct-floating-btn") ||
-          node.closest?.("#ct-mini-panel") ||
-          node.closest?.(".ct-translation")
-        ) {
-          return NodeFilter.FILTER_REJECT
-        }
-        // Accept block-level elements with direct text content
-        const tag = node.tagName?.toLowerCase()
-        if (
-          tag === "p" ||
-          tag === "h1" ||
-          tag === "h2" ||
-          tag === "h3" ||
-          tag === "h4" ||
-          tag === "h5" ||
-          tag === "h6" ||
-          tag === "li" ||
-          tag === "td" ||
-          tag === "th" ||
-          tag === "div" ||
-          tag === "span" ||
-          tag === "pre" ||
-          tag === "blockquote" ||
-          tag === "figcaption"
-        ) {
-          // Check if this element has text content (not just child elements with their own text)
-          const directText = getDirectText(node as HTMLElement)
-          if (directText.length > 20) {
-            // Min 20 chars
-            return NodeFilter.FILTER_ACCEPT
-          }
-        }
-        return NodeFilter.FILTER_SKIP
+  // Walk text nodes (leaf-first), so inline text rolls up to its block ancestor.
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node: Text) {
+      const parent = node.parentElement
+      if (!parent) return NodeFilter.FILTER_REJECT
+      // Skip whitespace-only text nodes
+      if (!node.nodeValue || node.nodeValue.trim().length === 0) {
+        return NodeFilter.FILTER_REJECT
       }
+      // Skip code / interactive / media / metadata tags (incl. ancestors)
+      if (parent.closest(NO_TRANSLATE_SELECTOR)) return NodeFilter.FILTER_REJECT
+      // Skip our own injected UI / existing translations
+      if (parent.closest(SELF_SELECTOR)) return NodeFilter.FILTER_REJECT
+      // Skip hidden elements
+      if (isHidden(parent)) return NodeFilter.FILTER_REJECT
+      return NodeFilter.FILTER_ACCEPT
     }
-  )
+  })
 
   while (walker.nextNode()) {
-    const el = walker.currentNode as HTMLElement
-    const text = getDirectText(el)
-    // Avoid duplicate translations
-    const hash = text.slice(0, 50)
-    if (!seen.has(hash) && containsEnglish(text)) {
-      seen.add(hash)
-      blocks.push({ el, text })
-    }
+    const textNode = walker.currentNode as Text
+    const parent = textNode.parentElement as HTMLElement
+    const block = findBlockAncestor(parent)
+    if (!block || seenEl.has(block)) continue
+
+    // innerText respects visible rendering and <br> spacing
+    const text = (block.innerText || block.textContent || "").trim()
+    if (text.length < 2) continue
+    if (!containsEnglish(text)) continue
+
+    const hash = text.slice(0, 80)
+    if (seenText.has(hash)) continue
+
+    seenEl.add(block)
+    seenText.add(hash)
+    blocks.push({ el: block, text })
   }
+
+  // Optionally collect image alt text (decorative alts filtered by containsEnglish).
+  document.body.querySelectorAll("img").forEach((img) => {
+    if (blocks.length >= 30) return
+    const el = img as HTMLImageElement
+    const alt = (el.alt || "").trim()
+    if (alt.length < 5 || !containsEnglish(alt)) return
+    if (el.closest(NO_TRANSLATE_SELECTOR)) return
+    if (el.closest(SELF_SELECTOR)) return
+    if (isHidden(el)) return
+    const hash = alt.slice(0, 80)
+    if (seenText.has(hash)) return
+    seenText.add(hash)
+    blocks.push({ el, text: alt })
+  })
 
   // Limit to prevent huge API calls
   return blocks.slice(0, 30)
-}
-
-function getDirectText(el: HTMLElement): string {
-  // Get text that is directly inside this element, not nested in child elements
-  // But for simplicity, use innerText (which gets visible text including children)
-  // and filter later
-  return (el.textContent || "").trim()
 }
 
 function containsEnglish(text: string): boolean {
