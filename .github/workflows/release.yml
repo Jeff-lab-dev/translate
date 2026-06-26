@@ -16,40 +16,21 @@ jobs:
       COMMIT_MSG: ${{ github.event.head_commit.message }}
 
     steps:
-      - name: Checkout (full history + tags for version diffing)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Decide version bump (LLM)
-        id: bump
-        env:
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_ENDPOINT: ${{ vars.LLM_ENDPOINT }}
-          LLM_MODEL: ${{ vars.LLM_MODEL }}
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-        run: node scripts/bump-version.mjs
-
-      - name: Commit version bump + tag
-        if: steps.bump.outputs.skipped != 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "chore(release): v${{ steps.bump.outputs.version }} [skip ci]" || echo "nothing to commit"
-          git tag "v${{ steps.bump.outputs.version }}"
-          git push origin main --tags
+      - name: Read version from package.json
+        id: ver
+        run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 11
 
-      - name: Setup pnpm Node cache
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -64,23 +45,20 @@ jobs:
       - name: Package extension
         run: pnpm package
 
-      - name: Create Release
-        if: steps.bump.outputs.skipped != 'true'
+      - name: Create/Update Release
         uses: ncipollo/release-action@v1
         with:
           artifacts: "build/*.zip"
-          tag: v${{ steps.bump.outputs.version }}
-          name: v${{ steps.bump.outputs.version }}
+          tag: v${{ steps.ver.outputs.version }}
+          name: v${{ steps.ver.outputs.version }}
           body: |
             ## 自动构建版本
 
-            - **版本**: v${{ steps.bump.outputs.version }}
-            - **bump 类型**: ${{ steps.bump.outputs.bump }}
+            - **版本**: v${{ steps.ver.outputs.version }}
             - **Commit**: ${{ env.COMMIT_SHA }}
             - **消息**: ${{ env.COMMIT_MSG }}
 
-            > bump 类型由 LLM 根据自上一 tag 以来的改动决定（major/minor/patch）。
-            > 未配置 `LLM_API_KEY` 时回退到 patch。
+            > 版本号由开发代理按改动大小在 `package.json` 中 bump（见 `AGENTS.md`）。
 
             ### 安装方式
             1. 下载下方的 `.zip` 文件
@@ -88,4 +66,5 @@ jobs:
             3. Chrome → `chrome://extensions` → 开发者模式
             4. 加载已解压的扩展程序 → 选择解压目录
           makeLatest: true
+          allowUpdates: true
           removeArtifacts: true
